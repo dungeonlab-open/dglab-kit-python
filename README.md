@@ -46,7 +46,7 @@ pip install dglab-kit-python
 | `targetId` | 控制方连接成功后获得的配对 ID；App 需要使用它接入                           |
 | `secret`   | V4 连接成功后获得的 HTTP 鉴权密钥                                  |
 | `clientId` | V4 中某个 App 被控方的连接 ID；向指定 App 下发指令时必须传入                 |
-| `slotId`   | App 暴露的设备插槽 ID；设备操作通过它定位设备                             |
+| `slotId`   | App 暴露的设备 ID；设备操作通过它定位设备                               |
 | `channel`  | 设备通道。V4 使用 `V4Channel.A` / `V4Channel.B`，也可传 `0` / `1` |
 
 控制方只需连接 Socket 服务；App 使用控制方的 `targetId` 接入。连接关系、设备更新和全部协议细节请参阅 [dglab-kit V4 协议参考](https://github.com/dungeonlab-open/dglab-kit/blob/main/README.md#v4-%E5%8D%8F%E8%AE%AE%E5%8F%82%E8%80%83)。
@@ -248,13 +248,13 @@ V4 支持多个 App 同时接入，因此所有面向 App 的方法都需要传�
 
 | 方法                                                              | 说明                    |
 |-----------------------------------------------------------------|-----------------------|
-| `get_device(slot_id)` / `getDevice(slot_id)`                    | 按插槽 ID 查找设备           |
+| `get_device(slot_id)` / `getDevice(slot_id)`                    | 按设备 ID 查找设备           |
 | `dispatch(data)`                                                | 合并支持的事件或响应；返回设备状态是否变化 |
 | `replace_devices(devices)` / `replaceDevices(devices)`          | 替换设备列表                |
-| `upsert_device(device)` / `upsertDevice(device)`                | 按插槽 ID 新增或替换设备        |
-| `remove_device(slot_id)` / `removeDevice(slot_id)`              | 按插槽 ID 移除设备           |
+| `upsert_device(device)` / `upsertDevice(device)`                | 按设备 ID 新增或替换设备        |
+| `remove_device(slot_id)` / `removeDevice(slot_id)`              | 按设备 ID 移除设备           |
 | `patch_devices(added=None, removed=None)` / `patchDevices(...)` | 应用设备新增和移除             |
-| `patch_slots(slots=None)` / `patchSlots(slots)`                 | 合并属性与插槽状态更新           |
+| `patch_slots(slots=None)` / `patchSlots(slots)`                 | 合并属性与设备状态更新           |
 | `destroy()`                                                     | 清空设备列表                |
 
 ### `V4Rpc`
