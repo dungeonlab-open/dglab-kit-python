@@ -363,7 +363,6 @@ class DglabSocketV4(DglabSocketBase):
     def __init__(self, **options: Any) -> None:
         super().__init__(**options)
         self._targetId: str | None = None
-        self._secret: str | None = None
         self._client_map: dict[str, V4Client] = {}
         self.rpc = V4Rpc(self.send_frame, **options)
         self._server_ping_task: asyncio.Task[None] | None = None
@@ -376,10 +375,6 @@ class DglabSocketV4(DglabSocketBase):
     @property
     def target_id(self) -> str | None:
         return self._targetId
-
-    @property
-    def secret(self) -> str | None:
-        return self._secret
 
     @property
     def clientIds(self) -> list[str]:
@@ -574,7 +569,6 @@ class DglabSocketV4(DglabSocketBase):
     def _on_socket_closed(self, _event: DglabSocketCloseEvent) -> None:
         self._stop_server_ping()
         self._targetId = None
-        self._secret = None
         for client in self._client_map.values():
             client.destroy()
         self._client_map.clear()
@@ -583,17 +577,16 @@ class DglabSocketV4(DglabSocketBase):
     def _get_connected_result(self) -> dict[str, Any] | None:
         if self._targetId is None:
             return None
-        return {"targetId": self._targetId, "secret": self._secret}
+        return {"targetId": self._targetId}
 
     def _handle_hello(self, frame: dict[str, Any]) -> None:
         clientId = frame.get("clientId")
         if not isinstance(clientId, str):
             return
         self._targetId = clientId
-        self._secret = frame.get("secret") if isinstance(frame.get("secret"), str) else None
         self._set_state(DglabSocketState.WAITING_FOR_PEER)
         self._start_server_ping()
-        self._resolve_active_connect({"targetId": clientId, "secret": self._secret})
+        self._resolve_active_connect({"targetId": clientId})
 
     def _handle_client_disconnected(self, clientId: str) -> None:
         self._detach_client(clientId)

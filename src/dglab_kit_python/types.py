@@ -30,9 +30,8 @@ class DglabSocketDeviceType(str, Enum):
     OVC_1 = "OVC_1"
 
 
-class DglabSocketConnectResult(TypedDict, total=False):
+class DglabSocketConnectResult(TypedDict):
     targetId: str
-    secret: str | None
 
 
 class DglabSocketCloseEvent(TypedDict):

@@ -44,7 +44,6 @@ pip install dglab-kit-python
 | 控制方        | 运行 `DglabSocket` 的 Python 程序，例如服务端或桌面控制器               |
 | App 被控方    | 连接到当前控制方的 DG-LAB APP                                   |
 | `targetId` | 控制方连接成功后获得的配对 ID；App 需要使用它接入                           |
-| `secret`   | V4 连接成功后获得的 HTTP 鉴权密钥                                  |
 | `clientId` | V4 中某个 App 被控方的连接 ID；向指定 App 下发指令时必须传入                 |
 | `slotId`   | App 暴露的设备 ID；设备操作通过它定位设备                               |
 | `channel`  | 设备通道。V4 使用 `V4Channel.A` / `V4Channel.B`，也可传 `0` / `1` |
@@ -100,7 +99,6 @@ async def main() -> None:
 
     result = await socket.connect()
     print("控制方 ID:", result["targetId"])
-    print("HTTP 鉴权密钥:", result.get("secret"))
     assert socket.state is DGLAB_SOCKET_STATE.WAITING_FOR_PEER
 
     # 保持连接以接收事件。
@@ -147,13 +145,11 @@ socket = DglabSocket(
 ```python
 result = await socket.connect()
 target_id = result["targetId"]
-secret = result.get("secret")
 ```
 
 | 字段         | 说明                      |
 |------------|-------------------------|
 | `targetId` | 当前控制方 ID；App 被控方需要使用它接入 |
-| `secret`   | V4 HTTP 鉴权密钥；V3 不提供此字段  |
 
 连接成功后再次调用 `connect()` 会直接返回当前连接结果。
 
@@ -216,7 +212,6 @@ V4 支持多个 App 同时接入，因此所有面向 App 的方法都需要传�
 | 方法或属性                                                                                                      | 返回值              | 说明                                              |
 |------------------------------------------------------------------------------------------------------------|------------------|-------------------------------------------------|
 | `target_id` / `targetId`                                                                                   | `str             | None`                                           | 当前控制方 ID|
-| `secret`                                                                                                   | `str             | None`                                           | V4 HTTP 鉴权密钥 |
 | `client_ids` / `clientIds`                                                                                 | `list[str]`      | 已接入 App ID 列表                                   |
 | `clients`                                                                                                  | `list[V4Client]` | 已接入 App 的状态对象列表                                 |
 | `rpc`                                                                                                      | `V4Rpc`          | Socket 使用的请求/响应辅助对象                             |
