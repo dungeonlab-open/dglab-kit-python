@@ -36,7 +36,11 @@ class DglabSocketBase(EventEmitter):
         self._manual_sender: SocketSender | None = None
         self._state = DglabSocketState.IDLE
         self._connect_future: asyncio.Future[dict[str, Any]] | None = None
+        self._connect_task: asyncio.Task[Any] | None = None
+        self._connect_attempt: object | None = None
         self._reader_task: asyncio.Task[None] | None = None
+        self._socket_generation = 0
+        self._socket_closed = True
 
     @property
     def state(self) -> DglabSocketState:
@@ -48,31 +52,66 @@ class DglabSocketBase(EventEmitter):
             return active
 
         if self._connect_future is not None:
-            return await self._connect_future
+            return await asyncio.shield(self._connect_future)
 
         loop = asyncio.get_running_loop()
-        self._connect_future = loop.create_future()
+        future = loop.create_future()
+        self._connect_future = future
+        attempt = object()
+        self._connect_attempt = attempt
         self._set_state(DglabSocketState.CONNECTING)
+        self._connect_task = asyncio.current_task()
+
+        async def open_and_wait() -> dict[str, Any]:
+            await self._open_socket(attempt)
+            return await asyncio.shield(future)
 
         try:
-            await self._open_socket()
+            # 同一个超时同时覆盖 WebSocket 握手与协议 hello 等待
             return await asyncio.wait_for(
-                self._connect_future,
+                open_and_wait(),
                 timeout=self._connect_timeout_seconds(),
             )
         except TimeoutError as error:
-            self._reject_active_connect(
-                create_named_error("socket-connect-timeout", "连接超时")
+            timeout_error = create_named_error("socket-connect-timeout", "连接超时")
+            await self._shutdown(
+                timeout_error,
+                code=1000,
+                reason="connect_timeout",
+                attempt=attempt,
             )
-            raise create_named_error("socket-connect-timeout", "连接超时") from error
-        except Exception as error:
-            if self._connect_future is not None and not self._connect_future.done():
-                self._reject_active_connect(
-                    error
-                    if isinstance(error, Exception)
-                    else create_named_error("socket-connect", str(error))
-                )
+            raise timeout_error from error
+        except asyncio.CancelledError:
+            cancelled_error = create_named_error(
+                "socket-connect-cancelled", "连接已取消"
+            )
+            if self._connect_attempt is not attempt:
+                raise cancelled_error
+            await self._shutdown(
+                cancelled_error,
+                code=1000,
+                reason="connect_cancelled",
+                attempt=attempt,
+            )
             raise
+        except Exception as error:
+            connect_error = (
+                error
+                if isinstance(error, Exception)
+                else create_named_error("socket-connect", str(error))
+            )
+            await self._shutdown(
+                connect_error,
+                code=1000,
+                reason="connect_error",
+                attempt=attempt,
+            )
+            raise
+        finally:
+            if self._connect_task is asyncio.current_task():
+                self._connect_task = None
+            if self._connect_attempt is attempt:
+                self._connect_attempt = None
 
     def set_sender(self, sender: SocketSender) -> DglabSocketBase:
         self._manual_sender = sender
@@ -103,24 +142,11 @@ class DglabSocketBase(EventEmitter):
     sendFrame = send_frame
 
     async def disconnect(self, code: int | None = None, reason: str | None = None) -> None:
-        self._reject_active_connect(
-            create_named_error("socket-connect-cancelled", "连接已取消")
+        await self._shutdown(
+            create_named_error("socket-connect-cancelled", "连接已取消"),
+            code=code,
+            reason=reason,
         )
-        self._set_state(DglabSocketState.DISCONNECTED)
-
-        if self._reader_task is not None:
-            self._reader_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._reader_task
-            self._reader_task = None
-
-        if self.socket is not None:
-            close = getattr(self.socket, "close", None)
-            if close is not None:
-                result = close(code=code, reason=reason) if code else close()
-                if isinstance(result, Awaitable):
-                    await result
-            self.socket = None
 
     async def destroy(self, code: int | None = None, reason: str | None = None) -> None:
         await self.disconnect(code, reason)
@@ -141,15 +167,11 @@ class DglabSocketBase(EventEmitter):
     handleSocketMessage = handle_message
 
     def handle_close(self, event_or_code: Any = None, reason: Any = None) -> None:
-        close_event = self._normalize_close_event(event_or_code, reason)
-        if self._connect_future is not None and not self._connect_future.done():
-            self._reject_active_connect(
-                create_named_error("socket-connect-closed", "连接完成前已关闭")
-            )
-
-        self._set_state(DglabSocketState.DISCONNECTED)
-        self._on_socket_closed(close_event)
-        self.emit("close", close_event)
+        self._finalize_close(
+            event_or_code,
+            reason,
+            create_named_error("socket-connect-closed", "连接完成前已关闭"),
+        )
 
     handleClose = handle_close
     handleSocketClose = handle_close
@@ -160,12 +182,17 @@ class DglabSocketBase(EventEmitter):
     handleError = handle_error
     handleSocketError = handle_error
 
-    async def _open_socket(self) -> Any:
-        if self.socket is not None:
+    async def _open_socket(self, attempt: object) -> Any:
+        if self._connect_attempt is not attempt:
+            raise create_named_error("socket-connect-cancelled", "连接已取消")
+
+        if self.socket is not None and not self._socket_closed:
             return self.socket
 
+        self.socket = None
+
         if not self.url:
-            self.socket = _ManualSocket(self)
+            self._install_socket(_ManualSocket(self))
             return self.socket
 
         try:
@@ -179,21 +206,129 @@ class DglabSocketBase(EventEmitter):
                     "使用 url 连接需要安装 websockets：pip install websockets",
                 ) from error
 
-        self.socket = await connect(self.url, subprotocols=self._protocol_list())
-        self.handle_open()
-        self._reader_task = asyncio.create_task(self._read_socket())
-        return self.socket
+        socket = await connect(self.url, subprotocols=self._protocol_list())
 
-    async def _read_socket(self) -> None:
+        # disconnect()/超时可能在握手期间使本次连接失效
+        if self._connect_attempt is not attempt:
+            await self._close_socket(socket, 1000, "connect_cancelled")
+            raise create_named_error("socket-connect-cancelled", "连接已取消")
+
+        generation = self._install_socket(socket)
+        self.handle_open()
+        if self._is_current_socket(socket, generation):
+            self._reader_task = asyncio.create_task(
+                self._read_socket(socket, generation)
+            )
+        return socket
+
+    async def _read_socket(self, socket: Any, generation: int) -> None:
         try:
-            async for message in self.socket:
+            async for message in socket:
+                if not self._is_current_socket(socket, generation):
+                    return
                 self.handle_message(message)
         except asyncio.CancelledError:
             raise
         except Exception as error:
-            self.handle_error(error)
+            if self._is_current_socket(socket, generation):
+                self.handle_error(error)
         finally:
-            self.handle_close()
+            if self._is_current_socket(socket, generation):
+                if self._reader_task is asyncio.current_task():
+                    self._reader_task = None
+                self.handle_close()
+
+    async def _shutdown(
+        self,
+        error: Exception,
+        *,
+        code: int | None,
+        reason: str | None,
+        attempt: object | None = None,
+    ) -> None:
+        # 旧连接的异常不能关闭或覆盖新一轮连接。
+        if attempt is not None and self._connect_attempt is not attempt:
+            return
+
+        socket = self.socket
+        reader_task = self._reader_task
+        connect_task = self._connect_task
+        current_task = asyncio.current_task()
+
+        try:
+            self._finalize_close(code, reason, error)
+        finally:
+            if connect_task is not None and connect_task is not current_task:
+                connect_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await connect_task
+
+            if reader_task is not None and reader_task is not current_task:
+                reader_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await reader_task
+
+            if self._reader_task is reader_task:
+                self._reader_task = None
+
+            await self._close_socket(socket, code, reason)
+
+    def _finalize_close(
+        self,
+        event_or_code: Any,
+        reason: Any,
+        connect_error: Exception,
+    ) -> None:
+        if self._socket_closed and self.socket is None and self._connect_future is None:
+            return
+
+        close_event = self._normalize_close_event(event_or_code, reason)
+        if self._connect_future is not None:
+            self._reject_active_connect(connect_error)
+
+        self._set_state(DglabSocketState.DISCONNECTED)
+        self._socket_closed = True
+        self.socket = None
+        self._socket_generation += 1
+        self._connect_attempt = None
+
+        reader_task = self._reader_task
+        self._reader_task = None
+        if reader_task is not None and reader_task is not asyncio.current_task():
+            reader_task.cancel()
+
+        self._on_socket_closed(close_event)
+        self.emit("close", close_event)
+
+    def _install_socket(self, socket: Any) -> int:
+        self.socket = socket
+        self._socket_closed = False
+        self._socket_generation += 1
+        return self._socket_generation
+
+    def _is_current_socket(self, socket: Any, generation: int) -> bool:
+        return (
+            self.socket is socket
+            and not self._socket_closed
+            and self._socket_generation == generation
+        )
+
+    async def _close_socket(
+        self,
+        socket: Any,
+        code: int | None,
+        reason: str | None,
+    ) -> None:
+        if socket is None:
+            return
+
+        close = getattr(socket, "close", None)
+        if close is None:
+            return
+
+        result = close(code=code, reason=reason) if code is not None else close()
+        if isinstance(result, Awaitable):
+            await result
 
     def _protocol_list(self) -> list[str] | None:
         if self.protocols is None:
@@ -220,6 +355,9 @@ class DglabSocketBase(EventEmitter):
         self._connect_future = None
         if future is not None and not future.done():
             future.set_exception(error)
+            # 该 Future 主要由 connect() 内部持有；在超时/取消后可能没有
+            # 主动读取一次异常以避免 asyncio 的未处理告警
+            future.exception()
 
     def _connect_timeout_seconds(self) -> float:
         return (self.connect_timeout or DEFAULT_CONNECT_TIMEOUT) / 1000

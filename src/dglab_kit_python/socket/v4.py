@@ -668,7 +668,6 @@ class DglabSocketV4(DglabSocketBase):
     async def _disconnect_for_server_ping_timeout(self) -> None:
         self._stop_server_ping()
         self.handle_error(create_named_error("socket-ping-timeout", "服务端 ping 超时"))
-        self.handle_close(1000, "ping_timeout")
         await super().disconnect(1000, "ping_timeout")
 
     def _create_device_events(

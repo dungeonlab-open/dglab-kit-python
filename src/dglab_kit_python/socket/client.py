@@ -87,6 +87,30 @@ class DglabSocket(EventEmitter):
     def __getattr__(self, name: str) -> Any:
         return getattr(self.raw, name)
 
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name.startswith("_") or name == "raw":
+            if name == "raw" and "raw" in self.__dict__:
+                raise AttributeError("Socket 的 raw 属性为只读")
+            object.__setattr__(self, name, value)
+            return
+
+        raw = self.__dict__.get("raw")
+        if raw is not None and hasattr(raw, name):
+            raise AttributeError(f"无法设置只读 SOCKET 属性: {name}")
+
+        object.__setattr__(self, name, value)
+
+    def __delattr__(self, name: str) -> None:
+        if name in self.__dict__:
+            object.__delattr__(self, name)
+            return
+
+        raw = self.__dict__.get("raw")
+        if raw is not None and hasattr(raw, name):
+            raise AttributeError(f"无法删除只读 SOCKET 属性: {name}")
+
+        object.__delattr__(self, name)
+
     def _forward_adapter_events(self) -> None:
         for event in SOCKET_EVENTS:
             self.raw.on(event, self._make_forwarder(event))
