@@ -1,58 +1,66 @@
+<div align="center">
+
+<img src="dglab.webp" alt="DG-LAB Logo" width="128" />
+
 # DGLAB KIT - Python
 
-DGLAB KIT 面向 **DG-LAB App** 的 Python SDK。它使用 `asyncio` 通过 WebSocket 与 App 配对，并控制 App 暴露的本地设备
+English | [简体中文](README_CN.md)
 
-SDK 提供两类能力：
+</div>
 
-- **Socket SDK**：连接 V3 / V4 Socket 服务，完成 App 配对、设备发现、强度控制、波形下发、任务清理和动作反馈接收
-- **Waveform SDK**：内置郊狼与负鼠波形数据，可直接用于 V3 / V4 波形操作
+DGLAB KIT is a Python SDK for the **DG-LAB App**. It uses `asyncio` to pair with the app over WebSocket and control the local devices exposed by the app.
 
-> 推荐优先使用 V4。V4 支持 `1 控制方 : N App 被控方`、设备列表同步和请求/响应等待；V3 仅用于兼容旧版控制端
+The SDK provides two main components:
 
-## 目录
+- **Socket SDK**: Connect to V3 / V4 Socket servers for app pairing, device discovery, Channel Intensity control, Pulse delivery, task cleanup, and action feedback.
+- **Pulse SDK**: Built-in Coyote and Opossum Pulse data, ready to use with V3 / V4 Pulse operations.
 
-- [运行要求](#运行要求)
-- [安装](#安装)
-- [核心概念](#核心概念)
-- [快速开始：V4 控制 APP](#快速开始v4-控制-app)
-- [生成 APP 配对二维码](#生成-app-配对二维码)
+> Use V4 for new integrations. V4 supports one controller connected to multiple app clients, device list synchronization, and request/response handling. V3 is provided for compatibility with legacy controllers.
+
+## Table of Contents
+
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Core Concepts](#core-concepts)
+- [Quick Start: Control the App with V4](#quick-start-control-the-app-with-v4)
+- [Generate an App Pairing QR Code](#generate-an-app-pairing-qr-code)
 - [Socket SDK API](#socket-sdk-api)
-- [V4 常用操作](#v4-常用操作)
-- [手动传输模式](#手动传输模式)
-- [V3 旧协议](#v3-旧协议)
-- [Waveform SDK](#waveform-sdk)
-- [V4 协议参考](#v4-协议参考)
-- [常见问题](#常见问题)
+- [Common V4 Operations](#common-v4-operations)
+- [Manual Transport Mode](#manual-transport-mode)
+- [Legacy V3 Protocol](#legacy-v3-protocol)
+- [Pulse SDK](#pulse-sdk)
+- [V4 Protocol Reference](#v4-protocol-reference)
+- [Troubleshooting](#troubleshooting)
 
-## 运行要求
+## Requirements
 
-- Python 3.13 或更高版本
-- 已有自己的 WebSocket 实现时，可使用[手动传输模式](#手动传输模式)
+- Python 3.13 or later.
+- If you already have a WebSocket implementation, use [Manual Transport Mode](#manual-transport-mode).
 
-## 安装
+## Installation
 
-在项目中安装 SDK：
+Install the SDK in your project:
 
 ```bash
 pip install dglab-kit-python
 ```
 
-## 核心概念
+## Core Concepts
 
-| 名称         | 说明                                                     |
-|------------|--------------------------------------------------------|
-| 控制方        | 运行 `DglabSocket` 的 Python 程序，例如服务端或桌面控制器               |
-| App 被控方    | 连接到当前控制方的 DG-LAB APP                                   |
-| `targetId` | 控制方连接成功后获得的配对 ID；App 需要使用它接入                           |
-| `clientId` | V4 中某个 App 被控方的连接 ID；向指定 App 下发指令时必须传入                 |
-| `slotId`   | App 暴露的设备 ID；设备操作通过它定位设备                               |
-| `channel`  | 设备通道。V4 使用 `V4Channel.A` / `V4Channel.B`，也可传 `0` / `1` |
+| Term | Description |
+|------|-------------|
+| Controller | The Python application running `DglabSocket`, such as a server or desktop controller. |
+| App client | The DG-LAB App attached to the current controller. |
+| `targetId` | The pairing ID assigned when the controller connects. The app uses it to attach. |
+| `clientId` | The connection ID of a specific V4 app client. Required when sending commands to that app. |
+| `slotId` | The ID of a device exposed by the app. Used to identify the device in device operations. |
+| `channel` | The device channel. V4 uses `V4Channel.A` / `V4Channel.B`, or `0` / `1`. |
 
-控制方只需连接 Socket 服务；App 使用控制方的 `targetId` 接入。连接关系、设备更新和全部协议细节请参阅 [dglab-kit V4 协议参考](https://github.com/dungeonlab-open/dglab-kit/blob/main/README.md#v4-%E5%8D%8F%E8%AE%AE%E5%8F%82%E8%80%83)
+The controller connects to the Socket server, and the app attaches using the controller's `targetId`. For the connection topology, device updates, and complete protocol details, see the [dglab-kit V4 protocol reference](https://github.com/dungeonlab-open/dglab-kit/blob/main/README.md#v4-protocol-reference).
 
-## 快速开始：V4 控制 APP
+## Quick Start: Control the App with V4
 
-以下示例连接 V4 服务，取得配对 ID，等待 App 接入，读取设备并执行强度与波形操作
+This example connects to a V4 server, obtains a pairing ID, waits for an app to attach, discovers devices, and performs Channel Intensity and Pulse operations.
 
 ```python
 import asyncio
@@ -74,7 +82,7 @@ async def main() -> None:
     )
 
     socket.on("state", lambda state, previous: print(f"{previous} -> {state}"))
-    socket.on("error", lambda error: print("Socket 错误:", error))
+    socket.on("error", lambda error: print("Socket error:", error))
     socket.on("devices", lambda devices, client_id: print(client_id, devices))
 
     async def on_client_attached(client_id: str) -> None:
@@ -98,25 +106,25 @@ async def main() -> None:
     socket.on("client-attached", on_client_attached)
 
     result = await socket.connect()
-    print("控制方 ID:", result["targetId"])
+    print("Controller ID:", result["targetId"])
     assert socket.state is DGLAB_SOCKET_STATE.WAITING_FOR_PEER
 
-    # 保持连接以接收事件。
+    # Keep the connection alive to receive events.
     await asyncio.Event().wait()
 
 
 asyncio.run(main())
 ```
 
-监听函数既可以是普通函数，也可以是 `async def`。异步监听函数会被调度到当前事件循环
+Listeners can be regular functions or `async def` functions. Async listeners are scheduled on the current event loop.
 
-## 生成 APP 配对二维码
+## Generate an App Pairing QR Code
 
-SDK 的 `connect()` 返回 `targetId` 后，请按照 [dglab-kit 的配对二维码文档](https://github.com/dungeonlab-open/dglab-kit#%E7%94%9F%E6%88%90-app-%E9%85%8D%E5%AF%B9%E4%BA%8C%E7%BB%B4%E7%A0%81) 生成二维码或配对链接并交给 App
+Once `connect()` returns a `targetId`, follow the [dglab-kit pairing QR code guide](https://github.com/dungeonlab-open/dglab-kit/blob/main/README.md#generate-an-app-pairing-qr-code) to generate a QR code or pairing link for the app.
 
 ## Socket SDK API
 
-### 构造函数
+### Constructor
 
 ```python
 from dglab_kit_python import DGLAB_SOCKET_VERSION, DglabSocket
@@ -130,168 +138,168 @@ socket = DglabSocket(
 )
 ```
 
-| 选项                 | 默认值                       | 说明                            |
-|--------------------|---------------------------|-------------------------------|
-| `url`              | `None`                    | WebSocket 服务地址；省略时使用手动传输模式    |
-| `protocols`        | `None`                    | 一个 WebSocket 子协议字符串或子协议列表     |
-| `connect_timeout`  | `8_000` ms                | `connect()` 等待协议握手的最长时间       |
-| `response_timeout` | `8_000` ms                | V4 请求等待响应的默认超时时间              |
-| `version`          | `DGLAB_SOCKET_VERSION.V4` | `V4` / `"v4"` 或 `V3` / `"v3"` |
+| Option | Default | Description |
+|--------|---------|-------------|
+| `url` | `None` | WebSocket server URL. Omit to use manual transport mode. |
+| `protocols` | `None` | A WebSocket subprotocol string or list of subprotocols. |
+| `connect_timeout` | `8_000` ms | Maximum time `connect()` waits for the protocol handshake. |
+| `response_timeout` | `8_000` ms | Default V4 response timeout. |
+| `version` | `DGLAB_SOCKET_VERSION.V4` | `V4` / `"v4"` or `V3` / `"v3"`. |
 
-构造函数也接受 `connectTimeout` 与 `responseTimeout` 两个驼峰别名；若两种写法同时出现，以 snake_case 的值为准
+The constructor also accepts the camelCase aliases `connectTimeout` and `responseTimeout`. If both naming styles are supplied, the snake_case value takes precedence.
 
-### `connect()` 返回值
+### `connect()` Result
 
 ```python
 result = await socket.connect()
 target_id = result["targetId"]
 ```
 
-| 字段         | 说明                      |
-|------------|-------------------------|
-| `targetId` | 当前控制方 ID；App 被控方需要使用它接入 |
+| Field | Description |
+|-------|-------------|
+| `targetId` | The current controller ID. App clients use it to attach. |
 
-连接成功后再次调用 `connect()` 会直接返回当前连接结果
+Calling `connect()` again after a successful connection returns the current connection result immediately.
 
-### Socket 状态
+### Socket States
 
-| 状态                                    | 说明                     |
-|---------------------------------------|------------------------|
-| `DGLAB_SOCKET_STATE.IDLE`             | 未连接                    |
-| `DGLAB_SOCKET_STATE.CONNECTING`       | 正在建立连接                 |
-| `DGLAB_SOCKET_STATE.WAITING_FOR_PEER` | 已连接，正在等待 App 接入        |
-| `DGLAB_SOCKET_STATE.PAIRED`           | 至少一个 V4 App，或 V3 对端已配对 |
-| `DGLAB_SOCKET_STATE.DISCONNECTED`     | 已断开                    |
+| State | Description |
+|-------|-------------|
+| `DGLAB_SOCKET_STATE.IDLE` | Not connected. |
+| `DGLAB_SOCKET_STATE.CONNECTING` | Establishing the connection. |
+| `DGLAB_SOCKET_STATE.WAITING_FOR_PEER` | Connected and waiting for an app to attach. |
+| `DGLAB_SOCKET_STATE.PAIRED` | At least one V4 app client, or the V3 peer, is paired. |
+| `DGLAB_SOCKET_STATE.DISCONNECTED` | Disconnected. |
 
-`DglabSocketState` 也提供对应的 PascalCase 成员名；`DGLAB_SOCKET_STATE` 是该枚举类的兼容别名
+`DglabSocketState` also provides equivalent PascalCase member names. `DGLAB_SOCKET_STATE` is a compatibility alias for this enum class.
 
-### 通用事件
+### Common Events
 
-`DglabSocket` 是事件发射器。`on()`、`once()`、`off()` 与 `remove_all_listeners()` 均返回当前 Socket，可用于链式调用；`emit()` 可发布应用自定义事件
+`DglabSocket` is an event emitter. `on()`, `once()`, `off()`, and `remove_all_listeners()` return the current socket for chaining. Use `emit()` to publish custom application events.
 
-| 事件                    | 监听函数参数                   | 说明                                                |
-|-----------------------|--------------------------|---------------------------------------------------|
-| `state`               | `(state, previous)`      | Socket 状态变化                                       |
-| `open`                | `(event)`                | WebSocket 传输层已打开                                  |
-| `close`               | `(event)`                | 传输层已关闭；事件含 `code`、`reason`、`wasClean` 和原始 `event` |
-| `error`               | `(error)`                | 传输、超时或协议错误                                        |
-| `message`             | `(text, raw)`            | 收到原始消息，尚未解析                                       |
-| `frame`               | `(frame)`                | 已解析 JSON 帧                                        |
-| `data`                | `(data, client_id=None)` | 收到应用数据                                            |
-| `action`              | `(action)`               | 收到 App 动作通知                                       |
-| `device`              | `(device, client_id)`    | 设备新增、变化或移除                                        |
-| `devices`             | `(devices, client_id)`   | V4 当前完整设备列表变化                                     |
-| `client-attached`     | `(client_id)`            | App 被控方已接入                                        |
-| `client-disconnected` | `(client_id)`            | App 被控方已断开                                        |
+| Event | Listener Arguments | Description |
+|-------|--------------------|-------------|
+| `state` | `(state, previous)` | Socket state changed. |
+| `open` | `(event)` | WebSocket transport opened. |
+| `close` | `(event)` | Transport closed. The event includes `code`, `reason`, `wasClean`, and the original `event`. |
+| `error` | `(error)` | Transport, timeout, or protocol error. |
+| `message` | `(text, raw)` | Raw message received, before parsing. |
+| `frame` | `(frame)` | Parsed JSON frame. |
+| `data` | `(data, client_id=None)` | Application data received. |
+| `action` | `(action)` | App action notification received. |
+| `device` | `(device, client_id)` | A device was added, changed, or removed. |
+| `devices` | `(devices, client_id)` | The current complete V4 device list changed. |
+| `client-attached` | `(client_id)` | An app client attached. |
+| `client-disconnected` | `(client_id)` | An app client disconnected. |
 
-### 通用方法
+### Common Methods
 
-| 方法或属性                                                                                           | 返回值                | 说明                        |
-|-------------------------------------------------------------------------------------------------|--------------------|---------------------------|
-| `state`                                                                                         | `DglabSocketState` | 当前连接状态                    |
-| `await connect()`                                                                               | `dict`             | 建立连接并等待协议握手               |
-| `await disconnect(code=None, reason=None)`                                                      | `None`             | 断开连接，并取消尚未完成的 `connect()` |
-| `await destroy(code=None, reason=None)`                                                         | `None`             | 断开连接并移除全部监听函数             |
-| `set_sender(sender)` / `setSender(sender)`                                                      | Socket             | 设置手动传输模式的发送函数             |
-| `send_raw(data)` / `sendRaw(data)`                                                              | `None`             | 发送原始文本或二进制数据              |
-| `send_frame(frame)` / `sendFrame(frame)`                                                        | `None`             | 将值 JSON 编码后发送             |
-| `handle_open(event=None)` / `handleOpen(event)` / `handleSocketOpen(event)`                     | `None`             | 转交传输层打开事件                 |
-| `handle_message(data)` / `handleMessage(data)` / `handleSocketMessage(data)`                    | `None`             | 转交入站传输消息                  |
-| `handle_close(event_or_code=None, reason=None)` / `handleClose(...)` / `handleSocketClose(...)` | `None`             | 转交传输层关闭事件                 |
-| `handle_error(error)` / `handleError(error)` / `handleSocketError(error)`                       | `None`             | 转交传输层错误                   |
-| `on(event, listener)`                                                                           | Socket             | 注册监听函数                    |
-| `once(event, listener)`                                                                         | Socket             | 注册仅触发一次的监听函数              |
-| `off(event, listener)`                                                                          | Socket             | 移除一个匹配的监听函数               |
-| `remove_all_listeners(event=None)`                                                              | Socket             | 移除指定事件或全部事件的监听函数          |
-| `emit(event, *args)`                                                                            | `bool`             | 调用监听函数；返回是否存在监听函数         |
+| Method or Property | Returns | Description |
+|--------------------|---------|-------------|
+| `state` | `DglabSocketState` | Current connection state. |
+| `await connect()` | `dict` | Connect and wait for the protocol handshake. |
+| `await disconnect(code=None, reason=None)` | `None` | Disconnect and cancel any pending `connect()` call. |
+| `await destroy(code=None, reason=None)` | `None` | Disconnect and remove all listeners. |
+| `set_sender(sender)` / `setSender(sender)` | Socket | Set the send function for manual transport mode. |
+| `send_raw(data)` / `sendRaw(data)` | `None` | Send raw text or binary data. |
+| `send_frame(frame)` / `sendFrame(frame)` | `None` | JSON-encode a value and send it. |
+| `handle_open(event=None)` / `handleOpen(event)` / `handleSocketOpen(event)` | `None` | Forward a transport open event. |
+| `handle_message(data)` / `handleMessage(data)` / `handleSocketMessage(data)` | `None` | Forward an incoming transport message. |
+| `handle_close(event_or_code=None, reason=None)` / `handleClose(...)` / `handleSocketClose(...)` | `None` | Forward a transport close event. |
+| `handle_error(error)` / `handleError(error)` / `handleSocketError(error)` | `None` | Forward a transport error. |
+| `on(event, listener)` | Socket | Register a listener. |
+| `once(event, listener)` | Socket | Register a listener that runs once. |
+| `off(event, listener)` | Socket | Remove one matching listener. |
+| `remove_all_listeners(event=None)` | Socket | Remove listeners for one event, or all listeners. |
+| `emit(event, *args)` | `bool` | Invoke listeners and return whether any listeners were registered. |
 
-### V4 属性与方法
+### V4 Properties and Methods
 
-V4 支持多个 App 同时接入，因此所有面向 App 的方法都需要传入目标 `client_id`
+V4 supports multiple app clients, so every method targeting an app requires that app's `client_id`.
 
-| 方法或属性                                                                                                      | 返回值              | 说明                                              |
-|------------------------------------------------------------------------------------------------------------|------------------|-------------------------------------------------|
-| `target_id` / `targetId`                                                                                   | `str \| None`    | 当前控制方 ID                                      |
-| `client_ids` / `clientIds`                                                                                 | `list[str]`      | 已接入 App ID 列表                                   |
-| `clients`                                                                                                  | `list[V4Client]` | 已接入 App 的状态对象列表                                 |
-| `rpc`                                                                                                      | `V4Rpc`          | Socket 使用的请求/响应辅助对象                             |
-| `get_client(client_id)` / `getClient(client_id)`                                                           | `V4Client \| None` | 获取指定 App 状态                                  |
-| `await request_devices(client_id)` / `await requestDevices(client_id)`                                     | `dict`           | 请求设备列表、更新缓存并触发 `devices`                        |
-| `send(client_id, data, options=None)`                                                                      | `asyncio.Future` | 发送自定义 V4 请求并等待响应                                |
-| `ping(client_id, options=None)`                                                                            | `asyncio.Future` | 向 App 发送 ping；结果为 App 收到请求时的本地时间戳              |
-| `reset_intensity(client_id, slot_id, channel, options=None)` / `resetIntensity(...)`                       | `asyncio.Future` | 将指定通道强度重置为零                                     |
-| `add_intensity(client_id, slot_id, channel, value, options=None)` / `addIntensity(...)`                    | `asyncio.Future` | 增加强度                                            |
-| `reduce_strength(client_id, slot_id, channel, value, options=None)` / `reduceStrength(...)`                | `asyncio.Future` | 减少强度                                            |
-| `set_temp_intensity(client_id, slot_id, channel, value, duration, options=None)` / `setTempIntensity(...)` | `asyncio.Future` | 设置临时强度，`duration` 单位为毫秒                         |
-| `send_pulse(client_id, slot_id, channel, duration, frames, options=None)` / `sendPulse(...)`               | `asyncio.Future` | 下发波形，`frames` 为 `list[str]` 或 `list[list[int]]` |
-| `clear_pulse(client_id, slot_id, channel)` / `clearPulse(...)`                                             | `asyncio.Future` | 清理指定设备通道的全部任务；等价于按通道调用 `clear_operate()`          |
-| `clear_operate(client_id, options=None)` / `clearOperate(...)`                                             | `asyncio.Future` | 清理全部、指定设备或指定通道的任务                               |
+| Method or Property | Returns | Description |
+|--------------------|---------|-------------|
+| `target_id` / `targetId` | `str \| None` | Current controller ID. |
+| `client_ids` / `clientIds` | `list[str]` | IDs of attached app clients. |
+| `clients` | `list[V4Client]` | State objects for attached app clients. |
+| `rpc` | `V4Rpc` | The socket's request/response helper. |
+| `get_client(client_id)` / `getClient(client_id)` | `V4Client \| None` | Get the state of a specific app client. |
+| `await request_devices(client_id)` / `await requestDevices(client_id)` | `dict` | Request the device list, update the cache, and emit `devices`. |
+| `send(client_id, data, options=None)` | `asyncio.Future` | Send a custom V4 request and wait for its response. |
+| `ping(client_id, options=None)` | `asyncio.Future` | Ping the app; returns the app's local timestamp when it received the request. |
+| `reset_intensity(client_id, slot_id, channel, options=None)` / `resetIntensity(...)` | `asyncio.Future` | Reset Channel Intensity to zero. |
+| `add_intensity(client_id, slot_id, channel, value, options=None)` / `addIntensity(...)` | `asyncio.Future` | Increase Channel Intensity. |
+| `reduce_strength(client_id, slot_id, channel, value, options=None)` / `reduceStrength(...)` | `asyncio.Future` | Decrease Channel Intensity. |
+| `set_temp_intensity(client_id, slot_id, channel, value, duration, options=None)` / `setTempIntensity(...)` | `asyncio.Future` | Apply a Temporary Intensity Change. `duration` is in milliseconds. |
+| `send_pulse(client_id, slot_id, channel, duration, frames, options=None)` / `sendPulse(...)` | `asyncio.Future` | Send a Pulse. `frames` is a `list[str]` or `list[list[int]]`. |
+| `clear_pulse(client_id, slot_id, channel)` / `clearPulse(...)` | `asyncio.Future` | Clear all tasks on the specified device channel. Equivalent to calling `clear_operate()` for that channel. |
+| `clear_operate(client_id, options=None)` / `clearOperate(...)` | `asyncio.Future` | Clear all tasks, or tasks for a specific device or channel. |
 
-### V4 操作选项
+### V4 Operation Options
 
-`reset_intensity()`、`add_intensity()`、`reduce_strength()`、`set_temp_intensity()` 和 `send_pulse()` 的 `options` 支持以下字段：
+The `options` argument for `reset_intensity()`, `add_intensity()`, `reduce_strength()`, `set_temp_intensity()`, and `send_pulse()` supports the following fields:
 
-| 选项          | 类型            | 说明                      |
-|-------------|---------------|-------------------------|
-| `timeout`   | `int`         | 本次请求等待响应的超时时间，单位为毫秒     |
-| `priority`  | `0`、`1` 或 `2` | 任务优先级                   |
-| `immediate` | `bool`        | 是否立即替换匹配的现有任务           |
-| `version`   | `int`         | 仅 `send_pulse()`：波形格式版本 |
-| `seq`       | `int`         | 仅 `send_pulse()`：波形序列号  |
+| Option | Type | Description |
+|--------|------|-------------|
+| `timeout` | `int` | Response timeout for this request, in milliseconds. |
+| `priority` | `0`, `1`, or `2` | Task priority. |
+| `immediate` | `bool` | Whether to replace matching existing tasks immediately. |
+| `version` | `int` | Pulse format version; `send_pulse()` only. |
+| `seq` | `int` | Pulse sequence number; `send_pulse()` only. |
 
-`send()` 和 `ping()` 的 `options` 仅支持 `timeout`。`clear_operate()` 的 `options` 用来指定 `slot_id` / `slotId` 和 `channel`，不使用上述操作选项
+The `options` argument for `send()` and `ping()` supports only `timeout`. For `clear_operate()`, `options` specifies `slot_id` / `slotId` and `channel`; the operation options above do not apply.
 
 ### `V4Client`
 
-`V4Client` 表示一个 V4 App 被控方，具有 `clientId` 字符串属性和可变的 `devices` 列表。它通常由 `DglabSocketV4` 管理
+`V4Client` represents a V4 app client. It has a string `clientId` property and a mutable `devices` list, and is typically managed by `DglabSocketV4`.
 
-| 方法                                                              | 说明                    |
-|-----------------------------------------------------------------|-----------------------|
-| `get_device(slot_id)` / `getDevice(slot_id)`                    | 按设备 ID 查找设备           |
-| `dispatch(data)`                                                | 合并支持的事件或响应；返回设备状态是否变化 |
-| `replace_devices(devices)` / `replaceDevices(devices)`          | 替换设备列表                |
-| `upsert_device(device)` / `upsertDevice(device)`                | 按设备 ID 新增或替换设备        |
-| `remove_device(slot_id)` / `removeDevice(slot_id)`              | 按设备 ID 移除设备           |
-| `patch_devices(added=None, removed=None)` / `patchDevices(...)` | 应用设备新增和移除             |
-| `patch_slots(slots=None)` / `patchSlots(slots)`                 | 合并属性与设备状态更新           |
-| `destroy()`                                                     | 清空设备列表                |
+| Method | Description |
+|--------|-------------|
+| `get_device(slot_id)` / `getDevice(slot_id)` | Find a device by ID. |
+| `dispatch(data)` | Merge supported events or responses; returns whether device state changed. |
+| `replace_devices(devices)` / `replaceDevices(devices)` | Replace the device list. |
+| `upsert_device(device)` / `upsertDevice(device)` | Add or replace a device by ID. |
+| `remove_device(slot_id)` / `removeDevice(slot_id)` | Remove a device by ID. |
+| `patch_devices(added=None, removed=None)` / `patchDevices(...)` | Apply device additions and removals. |
+| `patch_slots(slots=None)` / `patchSlots(slots)` | Merge property and device state updates. |
+| `destroy()` | Clear the device list. |
 
 ### `V4Rpc`
 
-`V4Rpc(send_frame, response_timeout=None)` 是底层请求跟踪器。每个 V4 Socket 都在 `socket.rpc` 创建一个实例；直接创建时传入发送外层服务器帧的函数。构造函数也接受 `responseTimeout` 别名
+`V4Rpc(send_frame, response_timeout=None)` is the low-level request tracker. Every V4 socket creates an instance at `socket.rpc`. When creating one directly, provide a function that sends outer server frames. The constructor also accepts the `responseTimeout` alias.
 
-| 方法                                                                 | 说明                   |
-|--------------------------------------------------------------------|----------------------|
-| `create_request(method, data=None)` / `createRequest(...)`         | 创建自动分配请求 ID 的 V4 请求  |
-| `send(client_id, data, options=None)`                              | 发送请求，并返回对应结果的 Future |
-| `send_operate(client_id, data, options=None)` / `sendOperate(...)` | 发送设备操作请求             |
-| `resolve_response(client_id, response)` / `resolveResponse(...)`   | 完成匹配的待处理响应           |
-| `reject_client_pending(client_id)` / `rejectClientPending(...)`    | 拒绝已断开 App 的全部待处理请求   |
-| `reject_all_pending(error)` / `rejectAllPending(error)`            | 拒绝全部待处理请求            |
-| `is_response(data)` / `isResponse(data)`                           | 判断数据是否为 V4 响应        |
-| `get_request_id(data)` / `getRequestId(data)`                      | 读取请求 ID              |
+| Method | Description |
+|--------|-------------|
+| `create_request(method, data=None)` / `createRequest(...)` | Create a V4 request with an automatically assigned request ID. |
+| `send(client_id, data, options=None)` | Send a request and return a Future for its result. |
+| `send_operate(client_id, data, options=None)` / `sendOperate(...)` | Send a device operation request. |
+| `resolve_response(client_id, response)` / `resolveResponse(...)` | Resolve the matching pending response. |
+| `reject_client_pending(client_id)` / `rejectClientPending(...)` | Reject all pending requests for a disconnected app client. |
+| `reject_all_pending(error)` / `rejectAllPending(error)` | Reject all pending requests. |
+| `is_response(data)` / `isResponse(data)` | Check whether data is a V4 response. |
+| `get_request_id(data)` / `getRequestId(data)` | Read the request ID. |
 
-### 导出类型与错误
+### Exported Types and Errors
 
-以下名称可直接从 `dglab_kit_python` 导入：
+The following names can be imported directly from `dglab_kit_python`:
 
-| 名称                                                 | 说明                                  |
-|----------------------------------------------------|-------------------------------------|
-| `DglabSocket`                                      | 版本选择门面类；`raw` 属性为实际的 V3 或 V4 Socket |
-| `DglabSocketBase`、`DglabSocketV3`、`DglabSocketV4`  | 基类及协议专用实现                           |
-| `DglabSocketVersion`、`DGLAB_SOCKET_VERSION`        | 版本枚举及兼容别名                           |
-| `DglabSocketState`、`DGLAB_SOCKET_STATE`            | 状态枚举及兼容别名                           |
-| `DglabSocketDeviceType`、`DGLAB_SOCKET_DEVICE_TYPE` | 设备类型枚举及兼容别名                         |
-| `V3Channel`、`V4Channel`、`V4ActionType`             | 通道与 V4 动作类型枚举                       |
-| `DglabError`、`create_named_error`                  | SDK 错误类及错误工厂函数                      |
+| Name | Description |
+|------|-------------|
+| `DglabSocket` | Version-selecting facade. Its `raw` property exposes the underlying V3 or V4 socket. |
+| `DglabSocketBase`, `DglabSocketV3`, `DglabSocketV4` | Base class and protocol-specific implementations. |
+| `DglabSocketVersion`, `DGLAB_SOCKET_VERSION` | Version enum and compatibility alias. |
+| `DglabSocketState`, `DGLAB_SOCKET_STATE` | State enum and compatibility alias. |
+| `DglabSocketDeviceType`, `DGLAB_SOCKET_DEVICE_TYPE` | Device type enum and compatibility alias. |
+| `V3Channel`, `V4Channel`, `V4ActionType` | Channel and V4 action type enums. |
+| `DglabError`, `create_named_error` | SDK error class and error factory. |
 
-`DglabError.name` 以 `DGLAB-` 开头。连接或响应超时、断开连接、缺少被控方、非法发送和远端错误都可能抛出或以该异常拒绝 Future。`create_named_error(name, message)` 可创建同样格式的 SDK 错误
+`DglabError.name` starts with `DGLAB-`. Connection or response timeouts, disconnections, missing app clients, invalid sends, and remote errors may raise this exception or cause a Future to fail with it. Use `create_named_error(name, message)` to create an SDK error in the same format.
 
-以下 `TypedDict` 可从 `dglab_kit_python.types` 导入并用于类型标注：`DglabSocketConnectResult`、`DglabSocketCloseEvent`、`V4DeviceDescriptor`、`V4DeviceInfo`、`V4DevicesGetResult`、`V4OperateOptions`、`V4AppendPulseDataOptions`、`V4ClearOperateOptions` 和 `V3WaveOptions`
+The following `TypedDict` types are available from `dglab_kit_python.types` for type annotations: `DglabSocketConnectResult`, `DglabSocketCloseEvent`, `V4DeviceDescriptor`, `V4DeviceInfo`, `V4DevicesGetResult`, `V4OperateOptions`, `V4AppendPulseDataOptions`, `V4ClearOperateOptions`, and `V3WaveOptions`.
 
-## V4 常用操作
+## Common V4 Operations
 
-### 请求设备列表
+### Request the Device List
 
 ```python
 result = await socket.request_devices(client_id)
@@ -300,9 +308,9 @@ for device in result["devices"]:
     print(device["slotId"], device["name"], device["type"])
 ```
 
-设备列表也会通过 `devices` 事件自动维护。使用 `socket.get_client(client_id)` 可读取当前缓存
+The device list is also maintained automatically through `devices` events. Use `socket.get_client(client_id)` to access the current cache.
 
-### 探测 APP 链路
+### Measure App Round-Trip Latency
 
 ```python
 from time import perf_counter
@@ -312,12 +320,12 @@ received_at = await socket.ping(client_id)
 rtt_ms = (perf_counter() - started_at) * 1_000
 
 print("RTT:", rtt_ms, "ms")
-print("App 收到 ping 时的本地时间戳:", received_at)
+print("App local timestamp when ping was received:", received_at)
 ```
 
-`ping()` 的结果是 App 收到请求时的本地时间戳；RTT 需要像上例一样由控制方按请求往返耗时计算
+`ping()` returns the app's local timestamp when it received the request. Calculate round-trip time on the controller by measuring the elapsed time, as shown above.
 
-### 强度控制
+### Channel Intensity Control
 
 ```python
 await socket.reset_intensity(client_id, slot_id, V4Channel.A)
@@ -325,19 +333,19 @@ await socket.add_intensity(client_id, slot_id, V4Channel.A, 5)
 await socket.reduce_strength(client_id, slot_id, V4Channel.B, 3)
 ```
 
-### 临时强度
+### Temporary Intensity Change
 
 ```python
 await socket.set_temp_intensity(
     client_id,
     slot_id,
     V4Channel.A,
-    30,    # 临时强度。
-    3_000, # 持续时间，单位为毫秒。
+    30,    # Temporary intensity.
+    3_000, # Duration in milliseconds.
 )
 ```
 
-### 下发波形
+### Send a Pulse
 
 ```python
 from dglab_kit_python import COYOTE_WAVEFORM, COYOTE_WAVEFORMS, V4Channel
@@ -346,22 +354,22 @@ frames = COYOTE_WAVEFORMS[COYOTE_WAVEFORM.BUBBLE]["raw"]
 await socket.send_pulse(client_id, slot_id, V4Channel.A, 1_000, frames)
 ```
 
-### 清理任务
+### Clear Tasks
 
 ```python
-# 清理某个 App 的全部任务
+# Clear all tasks for an app client
 await socket.clear_operate(client_id)
 
-# 清理指定设备的全部通道
+# Clear tasks on all channels of a specific device
 await socket.clear_operate(client_id, {"slot_id": slot_id})
 
-# 清理指定设备的指定通道
+# Clear tasks on a specific device channel
 await socket.clear_operate(client_id, {"slot_id": slot_id, "channel": V4Channel.A})
 ```
 
-### 发送自定义请求
+### Send a Custom Request
 
-SDK 未封装的 V4 RPC 可通过 `send()` 调用。`send()` 会补充请求 ID，并等待具有相同请求 ID 的响应。以下示例直接发送 `devices.get`；通常应优先使用等价的 `request_devices()` 封装：
+Use `send()` for V4 RPCs without a dedicated SDK method. It adds a request ID and waits for a response with the same ID. This example sends `devices.get` directly; for typical use, prefer the equivalent `request_devices()` method:
 
 ```python
 result = await socket.send(
@@ -373,9 +381,9 @@ result = await socket.send(
 print(result)
 ```
 
-## 手动传输模式
+## Manual Transport Mode
 
-不传 `url` 时，SDK 不会主动创建 WebSocket。绑定发送函数后，将传输层生命周期事件转交给 SDK。SDK 负责协议解析、状态、事件和 V4 请求等待；应用负责网络传输
+When `url` is omitted, the SDK does not create a WebSocket connection. Bind a send function and forward transport lifecycle events to the SDK. The SDK handles protocol parsing, state, events, and V4 response tracking; your application handles network transport.
 
 ```python
 import asyncio
@@ -388,20 +396,20 @@ async def main() -> None:
     socket = DglabSocket()
 
     def transport_send(data: str | bytes | bytearray | memoryview) -> None:
-        # 转发到传输层。
+        # Forward data to the transport.
         print(data)
 
     socket.set_sender(transport_send)
     connect_task = asyncio.create_task(socket.connect())
 
-    # 传输层打开后调用。
+    # Call when the transport opens.
     socket.handle_open()
 
-    # 将入站消息交给 SDK。
+    # Forward incoming messages to the SDK.
     def on_transport_message(data: Any) -> None:
         socket.handle_message(data)
 
-    # 协议握手完成后连接任务返回。
+    # The connection task returns after the protocol handshake completes.
     result = await connect_task
     print(result["targetId"])
 
@@ -415,11 +423,11 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-`send_raw()` 接受 `str`、`bytes`、`bytearray` 或 `memoryview`。`send_frame()` 会将 Python 值编码为紧凑 JSON 后发送。手动传输层必须保持出入站消息的顺序
+`send_raw()` accepts `str`, `bytes`, `bytearray`, or `memoryview`. `send_frame()` encodes Python values as compact JSON before sending. A manual transport must preserve the order of incoming and outgoing messages.
 
-## V3 旧协议
+## Legacy V3 Protocol
 
-V3 为旧版单 App 协议，使用 `DGLAB_SOCKET_VERSION.V3` 显式开启。通道使用 `V3Channel.A` / `V3Channel.B`，也可传 `1` / `2`。V3 控制方法是同步的：只发送数据，返回 `None`
+Enable the legacy, single-app V3 protocol explicitly with `DGLAB_SOCKET_VERSION.V3`. Use `V3Channel.A` / `V3Channel.B`, or `1` / `2`, for channels. V3 control methods are synchronous: they send data and return `None`.
 
 ```python
 import asyncio
@@ -452,33 +460,33 @@ async def main() -> None:
         )
 
     socket.on("client-attached", on_client_attached)
-    socket.on("action", lambda action: print("动作:", action))
+    socket.on("action", lambda action: print("Action:", action))
     result = await socket.connect()
-    print("控制方 ID:", result["targetId"])
+    print("Controller ID:", result["targetId"])
     await asyncio.Event().wait()
 
 
 asyncio.run(main())
 ```
 
-### V3 方法
+### V3 Methods
 
-| 方法或属性                                                      | 说明                                          |
-|------------------------------------------------------------|---------------------------------------------|
-| `target_id` / `targetId`                                   | 当前控制方 ID                                    |
-| `paired_client_id` / `pairedClientId`                      | 已配对 App ID                                  |
-| `send(data)`                                               | 配对后发送协议文档定义的 V3 自定义数据                       |
-| `add_strength(channel, step=1)` / `addStrength(...)`       | 增加强度；绝对步数超过 200 时抛出 `DglabError`            |
-| `reduce_strength(channel, step=1)` / `reduceStrength(...)` | 减少强度                                        |
-| `set_strength(channel, strength)` / `setStrength(...)`     | 设置强度                                        |
-| `send_pulse(options)` / `sendPulse(options)`               | 下发波形。`options` 使用 `channel`、`time` 和 `data` |
-| `clear_pulse(channel)` / `clearPulse(channel)`             | 清理通道波形                                      |
+| Method or Property | Description |
+|--------------------|-------------|
+| `target_id` / `targetId` | Current controller ID. |
+| `paired_client_id` / `pairedClientId` | ID of the paired app client. |
+| `send(data)` | Send custom V3 data as defined by the protocol, after pairing. |
+| `add_strength(channel, step=1)` / `addStrength(...)` | Increase Channel Intensity. Raises `DglabError` if the absolute step exceeds 200. |
+| `reduce_strength(channel, step=1)` / `reduceStrength(...)` | Decrease Channel Intensity. |
+| `set_strength(channel, strength)` / `setStrength(...)` | Set Channel Intensity. |
+| `send_pulse(options)` / `sendPulse(...)` | Send a Pulse. `options` contains `channel`, `time`, and `data`. |
+| `clear_pulse(channel)` / `clearPulse(channel)` | Clear Pulses on the channel. |
 
-V3 线协议的具体格式请查看 [V3 协议参考](https://github.com/dungeonlab-open/dglab-kit/blob/main/reference/WebSocket%20V3%E5%8D%8F%E8%AE%AE%E6%96%87%E6%A1%A3.md)
+For V3 usage and message parameters, see the [legacy V3 protocol reference](https://github.com/dungeonlab-open/dglab-kit/blob/main/README.md#legacy-v3-protocol).
 
-## Waveform SDK
+## Pulse SDK
 
-每个波形字典均包含本地化的 `label` 和原始帧 `raw`。使用 `COYOTE_WAVEFORM` 或 `OVC_WAVEFORM` 的枚举成员作为字典键
+Each Pulse dictionary contains a localized `label` and raw frames in `raw`. Use members of `COYOTE_WAVEFORM` or `OVC_WAVEFORM` as dictionary keys.
 
 ```python
 from dglab_kit_python import COYOTE_WAVEFORM, COYOTE_WAVEFORMS
@@ -488,22 +496,22 @@ print(waveform["label"]["cn"])
 frames = waveform["raw"]
 ```
 
-可从 `dglab_kit_python` 导入 `COYOTE_WAVEFORM`、`COYOTE_WAVEFORMS`、`OVC_WAVEFORM` 和 `OVC_WAVEFORMS`。需要具体枚举类时，可从 `dglab_kit_python.waveform` 导入 `CoyoteWaveform` 和 `OvcWaveform`
+Import `COYOTE_WAVEFORM`, `COYOTE_WAVEFORMS`, `OVC_WAVEFORM`, and `OVC_WAVEFORMS` from `dglab_kit_python`. For the enum classes themselves, import `CoyoteWaveform` and `OvcWaveform` from `dglab_kit_python.waveform`.
 
-## V4 协议参考
+## V4 Protocol Reference
 
-请阅读 [dglab-kit V4 协议参考](https://github.com/dungeonlab-open/dglab-kit/blob/main/README.md#v4-%E5%8D%8F%E8%AE%AE%E5%8F%82%E8%80%83)
+See the [dglab-kit V4 protocol reference](https://github.com/dungeonlab-open/dglab-kit/blob/main/README.md#v4-protocol-reference).
 
-## 常见问题
+## Troubleshooting
 
-### App 一直没有接入
+### The App Does Not Attach
 
-确认控制方 `connect()` 已成功返回当前 `targetId`，并按[配对二维码文档](#生成-app-配对二维码)将其交给 App。服务地址和配对参数请以 [V4 协议参考](#v4-协议参考) 为准
+Confirm that the controller's `connect()` call returned the current `targetId`, then pass it to the app as described in the [pairing QR code guide](#generate-an-app-pairing-qr-code). See the [V4 protocol reference](#v4-protocol-reference) for server URLs and pairing parameters.
 
-### 能收到 App 接入，但控制不了设备
+### The App Attaches, but Device Control Does Not Work
 
-先调用 `await socket.request_devices(client_id)`，确认返回了可用的 `slotId`，再使用该 `slotId` 和正确的通道调用 V4 操作。操作 Future 必须使用 `await`，以便接收远端错误
+Call `await socket.request_devices(client_id)` first and confirm that the response contains a valid `slotId`. Use that ID and the correct channel for V4 operations. Always `await` operation Futures to receive remote errors.
 
-### V4 请求超时或被控方断开
+### A V4 Request Times Out or the App Client Disconnects
 
-监听 `error` 和 `client-disconnected`。可在构造函数中设置 `response_timeout`，或为单次请求传入 `{"timeout": 毫秒}`；被控方断开时，等待该被控方的 Future 会以 `DglabError` 失败
+Listen for `error` and `client-disconnected`. Set `response_timeout` in the constructor, or pass `{"timeout": milliseconds}` for an individual request. If an app client disconnects, its pending Futures fail with `DglabError`.
