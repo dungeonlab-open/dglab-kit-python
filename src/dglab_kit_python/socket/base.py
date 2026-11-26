@@ -127,7 +127,7 @@ class DglabSocketBase(EventEmitter):
             self._manual_sender(data)
             return
 
-        if self.socket is None:
+        if self.socket is None or getattr(self.socket, "state", 1) != 1:
             raise create_named_error("socket-send", "WebSocket 尚未连接")
 
         result = self.socket.send(data)
@@ -142,6 +142,9 @@ class DglabSocketBase(EventEmitter):
     sendFrame = send_frame
 
     async def disconnect(self, code: int | None = None, reason: str | None = None) -> None:
+        if self.socket is None and self._connect_future is None:
+            self._set_state(DglabSocketState.DISCONNECTED)
+            return
         await self._shutdown(
             create_named_error("socket-connect-cancelled", "连接已取消"),
             code=code,
@@ -206,7 +209,14 @@ class DglabSocketBase(EventEmitter):
                     "使用 url 连接需要安装 websockets：pip install websockets",
                 ) from error
 
-        socket = await connect(self.url, subprotocols=self._protocol_list())
+        socket = await connect(
+            self.url,
+            subprotocols=self._protocol_list(),
+            open_timeout=None,  # connect() applies the SDK timeout to the entire handshake.
+            ping_interval=None,  # V4 handles its own relay-level heartbeat.
+            proxy=None,  # Match ws, which doesn't pick up system proxies by default.
+            max_size=100 * 1024 * 1024,  # ws default maxPayload.
+        )
 
         # disconnect()/超时可能在握手期间使本次连接失效
         if self._connect_attempt is not attempt:
@@ -236,7 +246,16 @@ class DglabSocketBase(EventEmitter):
             if self._is_current_socket(socket, generation):
                 if self._reader_task is asyncio.current_task():
                     self._reader_task = None
-                self.handle_close()
+                protocol = getattr(socket, "protocol", None)
+                close_event = {
+                    "code": getattr(socket, "close_code", None),
+                    "reason": getattr(socket, "close_reason", None),
+                    "wasClean": (
+                        getattr(protocol, "close_rcvd", None) is not None
+                        and getattr(protocol, "close_sent", None) is not None
+                    ),
+                }
+                self.handle_close(close_event)
 
     async def _shutdown(
         self,
@@ -326,7 +345,7 @@ class DglabSocketBase(EventEmitter):
         if close is None:
             return
 
-        result = close(code=code, reason=reason) if code is not None else close()
+        result = close(code=1000 if code is None else code, reason=reason or "")
         if isinstance(result, Awaitable):
             await result
 
@@ -360,16 +379,18 @@ class DglabSocketBase(EventEmitter):
             future.exception()
 
     def _connect_timeout_seconds(self) -> float:
-        return (self.connect_timeout or DEFAULT_CONNECT_TIMEOUT) / 1000
+        return (
+            self.connect_timeout if self.connect_timeout is not None else DEFAULT_CONNECT_TIMEOUT
+        ) / 1000
 
     @staticmethod
     def _decode_message(data: Any) -> str:
         if isinstance(data, str):
             return data
         if isinstance(data, bytes | bytearray | memoryview):
-            return bytes(data).decode()
+            return bytes(data).decode("utf-8-sig", errors="replace")
         if data is None:
-            return "None"
+            return "null"
         return str(data)
 
     @staticmethod
@@ -390,7 +411,11 @@ class DglabSocketBase(EventEmitter):
 
         return {
             "code": event_or_code if isinstance(event_or_code, int) else 0,
-            "reason": reason if isinstance(reason, str) else (str(reason) if reason else ""),
+            "reason": reason if isinstance(reason, str) else (
+                bytes(reason).decode("utf-8", errors="replace")
+                if isinstance(reason, bytes | bytearray | memoryview)
+                else (str(reason) if reason else "")
+            ),
             "wasClean": False,
             "event": event_or_code,
         }

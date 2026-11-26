@@ -41,7 +41,13 @@ class DglabSocketV3(DglabSocketBase):
         if not self._targetId or not self._paired_target_id:
             raise create_named_error("socket-target", "V3 尚未完成配对")
 
-        payload = dict(data) if isinstance(data, dict) else {"data": data}
+        # TS spreads the supplied value into the outgoing command object.
+        if isinstance(data, dict):
+            payload = dict(data)
+        elif isinstance(data, (str, list, tuple)):
+            payload = {str(index): value for index, value in enumerate(data)}
+        else:
+            payload = {}
         payload.update({"clientId": self._targetId, "targetId": self._paired_target_id})
         self.send_frame(payload)
 
@@ -112,12 +118,10 @@ class DglabSocketV3(DglabSocketBase):
         if frame_type == "bind":
             clientId = frame.get("clientId")
             targetId = frame.get("targetId")
-            if not isinstance(clientId, str):
-                return
-            if "targetId" not in frame or targetId == "":
+            if isinstance(clientId, str) and ("targetId" not in frame or targetId == ""):
                 self._handle_initial_bind(clientId)
                 return
-            if isinstance(targetId, str) and frame.get("message") == "200":
+            if isinstance(clientId, str) and isinstance(targetId, str) and frame.get("message") == "200":
                 self._handle_pair_bind(targetId)
                 return
         elif frame_type == "break":
@@ -156,7 +160,7 @@ class DglabSocketV3(DglabSocketBase):
         self._device = None
 
     def _get_connected_result(self) -> dict[str, Any] | None:
-        if self._targetId is None:
+        if not self._targetId:
             return None
         return {"targetId": self._targetId}
 
@@ -193,7 +197,7 @@ class DglabSocketV3(DglabSocketBase):
     def _parse_action_message(message: str) -> int | None:
         import re
 
-        match = re.fullmatch(r"feedback-(\d+)", message)
+        match = re.fullmatch(r"feedback-([0-9]+)", message)
         if match is None:
             return None
         return int(match.group(1))
@@ -201,7 +205,7 @@ class DglabSocketV3(DglabSocketBase):
     def _parse_device_message(self, message: str) -> dict[str, Any] | None:
         import re
 
-        match = re.fullmatch(r"strength-(\d+)-(\d+)-(\d+)-(\d+)", message)
+        match = re.fullmatch(r"strength-([0-9]+)\+([0-9]+)\+([0-9]+)\+([0-9]+)", message)
         if match is None or self._paired_target_id is None:
             return None
 
