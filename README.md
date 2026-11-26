@@ -1,10 +1,10 @@
 <div align="center">
 
-<img src="dglab.webp" alt="DG-LAB Logo" width="128" />
+<img src="https://raw.githubusercontent.com/dungeonlab-open/dglab-kit-python/main/dglab.webp" alt="DG-LAB Logo" width="128" />
 
 # DGLAB KIT - Python
 
-English | [简体中文](README_CN.md)
+English | [简体中文](https://github.com/dungeonlab-open/dglab-kit-python/blob/main/README_CN.md)
 
 </div>
 

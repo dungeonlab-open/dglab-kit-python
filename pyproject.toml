@@ -1,7 +1,7 @@
 [project]
 name = "dglab-kit-python"
 version = "0.1.0"
-description = "Add your description here"
+description = "Python SDK for the DG-LAB App V3 and V4 WebSocket protocols."
 readme = "README.md"
 authors = [
     { name = "LF112", email = "lf@lf112.net" }
@@ -10,6 +10,10 @@ requires-python = ">=3.13"
 dependencies = [
     "websockets>=15.0.1",
 ]
+
+[project.urls]
+Homepage = "https://github.com/dungeonlab-open/dglab-kit-python"
+Issues = "https://github.com/dungeonlab-open/dglab-kit-python/issues"
 
 [build-system]
 requires = ["uv_build>=0.9.1,<0.10.0"]
