@@ -3,6 +3,7 @@ name = "dglab-kit-python"
 version = "0.1.0"
 description = "Python SDK for the DG-LAB App V3 and V4 WebSocket protocols."
 readme = "README.md"
+license-files = ["LICENSE"]
 authors = [
     { name = "LF112", email = "lf@lf112.net" }
 ]
