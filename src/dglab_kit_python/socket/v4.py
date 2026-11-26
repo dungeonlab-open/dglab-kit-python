@@ -1,10 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-import time
 from dataclasses import dataclass
-from random import choices
-from string import ascii_lowercase, digits
 from typing import Any
 
 from dglab_kit_python.errors import create_named_error
@@ -30,6 +27,7 @@ def _is_record(value: Any) -> bool:
 
 
 _DEVICE_PATCH_UNCHANGED = object()
+_MISSING = object()
 
 
 def _merge_patch(current: Any, patch: Any) -> Any:
@@ -170,6 +168,15 @@ class _PendingResponse:
     settled: bool = False
 
 
+class V4SendFuture(asyncio.Future[Any]):
+    """Awaitable V4 result with the same request identifiers as the JS promise."""
+
+    def __init__(self, request_id: str, client_id: str) -> None:
+        super().__init__()
+        self.requestId = self.request_id = request_id
+        self.clientId = self.client_id = client_id
+
+
 class V4Rpc:
     def __init__(
         self,
@@ -181,12 +188,13 @@ class V4Rpc:
     ) -> None:
         self._pending: dict[str, _PendingResponse] = {}
         self._send_frame = send_frame
+        self._request_id_counter = 0
         self._response_timeout = response_timeout if response_timeout is not None else responseTimeout
 
-    def create_request(self, method: str, data: Any = None) -> dict[str, Any]:
+    def create_request(self, method: str, data: Any = _MISSING) -> dict[str, Any]:
         requestId = self._create_request_id()
-        request = {"t": "req", "reqId": requestId, "requestId": requestId, "m": method}
-        if data is not None:
+        request = {"t": "req", "reqId": requestId, "m": method}
+        if data is not _MISSING:
             request["data"] = data
         return request
 
@@ -194,19 +202,21 @@ class V4Rpc:
 
     def send(
         self, clientId: str, data: Any, options: dict[str, Any] | None = None
-    ) -> asyncio.Future[Any]:
+    ) -> V4SendFuture:
         if not clientId:
             raise create_named_error("socket-clientId", "发送协议数据需要指定 clientId")
 
         loop = asyncio.get_running_loop()
-        requestId = self.get_request_id(data) or self._create_request_id()
+        requestId = self.get_request_id(data)
+        if requestId is None:
+            requestId = self._create_request_id()
 
         if _is_record(data):
-            payload = {**data, "requestId": requestId, "reqId": requestId}
+            payload = {**data, "reqId": requestId}
+            payload.pop("requestId", None)
         else:
             payload = {
                 "t": "req",
-                "requestId": requestId,
                 "reqId": requestId,
                 "m": "custom",
                 "data": data,
@@ -214,12 +224,12 @@ class V4Rpc:
 
         waitable_request_id = self.get_request_id(payload)
         if waitable_request_id is None:
-            future: asyncio.Future[Any] = loop.create_future()
+            future = V4SendFuture(requestId, clientId)
             future.set_exception(create_named_error("socket-command", "当前消息没有可等待响应"))
             return future
 
         key = self._pending_key(clientId, waitable_request_id)
-        future = loop.create_future()
+        future = V4SendFuture(requestId, clientId)
         pending = _PendingResponse(clientId, waitable_request_id, future)
         pending.timer = loop.call_later(
             self._response_timeout_seconds(options),
@@ -228,8 +238,6 @@ class V4Rpc:
             pending,
         )
         self._pending[key] = pending
-
-        print(f"## {payload}")
 
         try:
             self._send_frame({"type": "message", "clientId": clientId, "data": payload})
@@ -241,7 +249,7 @@ class V4Rpc:
 
     def send_operate(
         self, clientId: str, data: dict[str, Any], options: dict[str, Any] | None = None
-    ) -> asyncio.Future[Any]:
+    ) -> V4SendFuture:
         timeout = self._operate_response_timeout(data, options)
         return self.send(
             clientId,
@@ -273,7 +281,8 @@ class V4Rpc:
         entry.settled = True
         if entry.timer is not None:
             entry.timer.cancel()
-        entry.future.set_result(response.get("result"))
+        if not entry.future.done():
+            entry.future.set_result(response.get("result"))
 
     resolveResponse = resolve_response
 
@@ -312,9 +321,8 @@ class V4Rpc:
     getRequestId = get_request_id
 
     def _create_request_id(self) -> str:
-        stamp = base36(int(time.time() * 1000))
-        suffix = "".join(choices(ascii_lowercase + digits, k=6))
-        return f"v4-{stamp}-{suffix}"
+        self._request_id_counter += 1
+        return str(self._request_id_counter)
 
     def _response_timeout_seconds(self, options: dict[str, Any] | None = None) -> float:
         option_timeout = (options or {}).get("timeout")
@@ -404,12 +412,12 @@ class DglabSocketV4(DglabSocketBase):
 
     def send(
         self, clientId: str, data: Any, options: dict[str, Any] | None = None
-    ) -> asyncio.Future[Any]:
+    ) -> V4SendFuture:
         return self.rpc.send(clientId, data, options)
 
     def ping(
         self, clientId: str, options: dict[str, Any] | None = None
-    ) -> asyncio.Future[Any]:
+    ) -> V4SendFuture:
         return self.rpc.send(clientId, self.rpc.create_request("ping"), options)
 
     async def disconnect(self, code: int | None = None, reason: str | None = None) -> None:
@@ -423,7 +431,7 @@ class DglabSocketV4(DglabSocketBase):
         channel: V4Channel | int,
         value: int | float,
         options: V4OperateOptions | None = None,
-    ) -> asyncio.Future[Any]:
+    ) -> V4SendFuture:
         return self.rpc.send_operate(
             clientId,
             {
@@ -443,7 +451,7 @@ class DglabSocketV4(DglabSocketBase):
         channel: V4Channel | int,
         value: int | float,
         options: V4OperateOptions | None = None,
-    ) -> asyncio.Future[Any]:
+    ) -> V4SendFuture:
         return self.add_intensity(clientId, slotId, channel, -value, options)
 
     reduceStrength = reduce_strength
@@ -456,7 +464,7 @@ class DglabSocketV4(DglabSocketBase):
         value: int | float,
         duration: int | float,
         options: V4OperateOptions | None = None,
-    ) -> asyncio.Future[Any]:
+    ) -> V4SendFuture:
         return self.rpc.send_operate(
             clientId,
             {
@@ -476,7 +484,7 @@ class DglabSocketV4(DglabSocketBase):
         slotId: str,
         channel: V4Channel | int,
         options: V4OperateOptions | None = None,
-    ) -> asyncio.Future[Any]:
+    ) -> V4SendFuture:
         return self.rpc.send_operate(
             clientId,
             {
@@ -497,7 +505,7 @@ class DglabSocketV4(DglabSocketBase):
         duration: int | float,
         frames: list[list[int]] | list[str],
         options: V4AppendPulseDataOptions | None = None,
-    ) -> asyncio.Future[Any]:
+    ) -> V4SendFuture:
         options = options or {}
         payload = {
             **self._create_operate_base(slotId, channel, options),
@@ -515,19 +523,21 @@ class DglabSocketV4(DglabSocketBase):
 
     def clear_pulse(
         self, clientId: str, slotId: str, channel: V4Channel | int
-    ) -> asyncio.Future[Any]:
+    ) -> V4SendFuture:
         return self.clear_operate(clientId, {"slotId": slotId, "channel": channel})
 
     clearPulse = clear_pulse
 
     def clear_operate(
         self, clientId: str, options: V4ClearOperateOptions | None = None
-    ) -> asyncio.Future[Any]:
-        data = None
+    ) -> V4SendFuture:
+        data: Any = _MISSING
         if options:
             slot_id = options.get("slot_id") or options.get("slotId")  # type: ignore[typeddict-item]
             if slot_id:
-                data = {"s": slot_id, "c": options.get("channel")}
+                data = {"s": slot_id}
+                if "channel" in options:
+                    data["c"] = options["channel"]
         return self.rpc.send(clientId, self.rpc.create_request("device.op.clear", data))
 
     clearOperate = clear_operate
@@ -563,7 +573,10 @@ class DglabSocketV4(DglabSocketBase):
             self.handle_error(create_named_error("socket-idle-timeout", "控制方空闲超时"))
         elif frame_type == "error":
             self.handle_error(
-                create_named_error("socket-v4-server", frame.get("message") or frame.get("code") or "V4 服务端错误")
+                create_named_error(
+                    "socket-v4-server",
+                    frame["message"] if frame.get("message") is not None else frame.get("code"),
+                )
             )
 
     def _on_socket_closed(self, _event: DglabSocketCloseEvent) -> None:
@@ -575,7 +588,7 @@ class DglabSocketV4(DglabSocketBase):
         self.rpc.reject_all_pending(create_named_error("socket-disconnected", "WebSocket 已断开"))
 
     def _get_connected_result(self) -> dict[str, Any] | None:
-        if self._targetId is None:
+        if not self._targetId:
             return None
         return {"targetId": self._targetId}
 
@@ -686,7 +699,7 @@ class DglabSocketV4(DglabSocketBase):
                 if event is not None
             ]
             next_slot_ids = {
-                device.get("slotId") for device in devices if isinstance(device.get("slotId"), str)
+                device.get("slotId") for device in devices if isinstance(device, dict) and isinstance(device.get("slotId"), str)
             }
             removed = [
                 {"slotId": device["slotId"], "removed": True}
@@ -751,7 +764,7 @@ class DglabSocketV4(DglabSocketBase):
             _is_record(data)
             and data.get("t") == "ev"
             and data.get("ev") == "custom.action"
-            and isinstance(data.get("action"), int | float)
+            and type(data.get("action")) in (int, float)
         )
 
     @staticmethod
@@ -768,14 +781,3 @@ class DglabSocketV4(DglabSocketBase):
         if "immediate" in options:
             payload["im"] = options["immediate"]
         return payload
-
-
-def base36(number: int) -> str:
-    alphabet = digits + ascii_lowercase
-    if number == 0:
-        return "0"
-    result = ""
-    while number:
-        number, index = divmod(number, 36)
-        result = alphabet[index] + result
-    return result
