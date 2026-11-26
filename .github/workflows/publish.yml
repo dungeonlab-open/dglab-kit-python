@@ -1,6 +1,8 @@
 name: Build and publish Python package
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       publish:
@@ -16,6 +18,8 @@ concurrency:
 
 jobs:
   build:
+    outputs:
+      unpublished: ${{ steps.registry.outputs.unpublished }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -34,6 +38,34 @@ jobs:
           python -m venv .wheel-test
           .wheel-test/bin/python -m pip install dist/*.whl
           .wheel-test/bin/python -I -c "from dglab_kit_python import DglabSocket, DglabSocketVersion; assert DglabSocketVersion.V4.value == 'v4'; print(DglabSocket.__name__)"
+      - name: Check whether PyPI already has this version
+        id: registry
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import tomllib
+          from urllib.error import HTTPError
+          from urllib.request import Request, urlopen
+          from packaging.utils import canonicalize_name
+          from packaging.version import Version
+
+          with open("pyproject.toml", "rb") as f:
+              project = tomllib.load(f)["project"]
+          name, version = canonicalize_name(project["name"]), Version(project["version"])
+          request = Request(f"https://pypi.org/simple/{name}/", headers={"Accept": "application/vnd.pypi.simple.v1+json"})
+          try:
+              with urlopen(request, timeout=30) as response:
+                  published = {Version(v) for v in json.load(response)["versions"]}
+          except HTTPError as error:
+              if error.code != 404:
+                  raise
+              published = set()
+          unpublished = version not in published
+          print(f"{name} {version}: " + ("new version" if unpublished else "already published; skipping upload"))
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              print(f"unpublished={str(unpublished).lower()}", file=output)
+          PY
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: python-distributions
@@ -41,7 +73,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    if: ${{ inputs.publish && github.ref == 'refs/heads/main' }}
+    if: ${{ github.ref == 'refs/heads/main' && needs.build.outputs.unpublished == 'true' && (github.event_name == 'push' || inputs.publish) }}
     needs: build
     runs-on: ubuntu-latest
     environment:
